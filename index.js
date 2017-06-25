@@ -1,55 +1,23 @@
-const firebase = require('firebase');
 const Rx = require('rxjs');
-const admin = require('firebase-admin');
-const cert = require('./cert.json');
+const messaging = require('./messaging').messaging;
+const database = require('./database');
+const db = database.database;
+const DB_PATHS = database.DB_PATHS({version: 1});
 
-const config = {
-    credential: admin.credential.cert(cert),
-    databaseURL: "https://towers-42c7a.firebaseio.com",
-    messagingSenderId: "80269606755",
-};
-firebase.initializeApp(config);
-admin.initializeApp(config);
-const db = app.database();
-const messaging = admin.messaging();
-
+/**
+ * Transform the callbacks into a notification stream and enrich
+ * each game notification with the objects of the participating players.
+ */
 const gameChangeStream = Rx.Observable.create(observer => {
-    const ref = db.ref('v1/games');
-    const eventRef = ref.on('child_changed', val => observer.next(val));
+    const gamesRef = db.ref(DB_PATHS.GAMES);
+    const callbackRef = gamesRef.on('child_changed', val => observer.next(val));
 
     return () => {
-        ref.off('child_changed', eventRef);
+        gamesRef.off('child_changed', callbackRef);
     };
-});
-
-function getPlayer(playerId) {
-    const playerRef = db.ref(`v1/players/${playerId}`);
-    return playerRef.once('value');
-}
-
-function updateLastGameAction(game) {
-    
-}
-
-function sendNotification(player, opponent, game) {
-    const payload = {
-        notification: {
-            title: "Urgent action needed!",
-            body: "Urgent action is needed to prevent your account from being disabled!"
-        }
-    };
-    const options = {
-        priority: "high",
-        timeToLive: 60 * 60 * 24
-    };
-    messaging.sendToDevice(
-        'd6F2YbBYaUU:APA91bGwD31J9YhIquihWoH7X4_PihjjSn668qykWxGqLuGDn8GgBXroG-9uHFrBeq0Iw3l3yfYKg18bmD6MTAxRzm-1BODqCRm_7RwzCPK0wF31aL71YwMbGO9sqr8GD_sC3cx0Fhd1',
-        payload,
-        options
-    );
-}
-
-async function handleGameChange(game) {
+}).map(async gameSnapshot => {
+    const game = gameSnapshot.val();
+    const gameKey = gameSnapshot.key;
     const playerId = game.currentPlayer;
     const opponentId = Object
         .keys(game.players)
@@ -60,14 +28,96 @@ async function handleGameChange(game) {
         .all([promisedPlayer, promisedOpponent]);
     const [player, opponent] = playerSnapshots
         .map(playerSnapshot => playerSnapshot.val());
-    console.log(`Current player is now: ${player.name}, so I will send a notification to ${player.token}`);
-    sendNotification(player, opponent, game)
+
+    return Object.assign(game, {
+        player,
+        opponent,
+        key: gameKey
+    });
+});
+
+/**
+ * Retrieves a player object from the database by its ID.
+ * 
+ * @param {String} playerId ID of the player to get from the database.
+ * @return {Promise<FirebaseDataSnapshot>}
+ */
+function getPlayer(playerId) {
+    const playerRef = db.ref(`${DB_PATHS.PLAYERS}/${playerId}`);
+    return playerRef.once('value');
 }
 
-gameChangeStream.subscribe(gameSnapshot => {
-    handleGameChange(gameSnapshot.val());
-}, err => {
-    console.error('something went wrong!');
+/**
+ * Updates the timestamp, when this game has last caused a notification.
+ * 
+ * @param {String} gameKey Key that identifies this game.
+ * @return {Promise<void>}
+ */
+function updateLastGameAction(gameKey) {
+    console.log(`Updating ${gameKey}.`);
+    const gameLastUpdateRef = db.ref(`${DB_PATHS.NOTIFICATIONS}/${gameKey}`);
+
+    return gameLastUpdateRef.set(Date.now());
+}
+
+/**
+ * Checks a game for its current state and returns true if it has ended.
+ * 
+ * @param {Object} game Game to check whether it has ended.
+ * @return {Boolean}
+ */
+function hasGameEnded(game) {
+    if (game.moves) {
+        const lastMove = game.moves[game.moves.length - 1];
+        
+        return lastMove.targetField.y === 0 ||
+            lastMove.targetField.y === 7;
+    }
+
+    return false;
+}
+
+/**
+ * Sends a notification to the player that has been waiting for his opponent.
+ * 
+ * @param {Object} game Game this notification is about.
+ * @returns {Promise<Object>}
+ */
+function sendNotification(game) {
+    console.log(`Change in game '${game.key}': sending notification to '${game.player.name}'`);
+    const payload = {
+        notification: hasGameEnded(game) ?
+        {
+            title: `${game.opponent.name} has just defeated you!`,
+            body: `Sorry ${game.player.name}, you have lost the game in round #${game.moves.length}.`
+        } :
+        {
+            title: `${game.opponent.name} has just moved!`,
+            body: `It is round #${game.moves.length} in your game against ${game.opponent.name}.`
+        }
+    };
+    const options = {
+        priority: "high",
+        timeToLive: 60 * 60 * 24
+    };
+    return messaging.sendToDevice(
+        game.player.token,
+        payload,
+        options
+    );
+}
+
+gameChangeStream.subscribe(promisedGame => {
+    (async () => {
+        const game = await promisedGame;
+
+        await sendNotification(game);
+        await updateLastGameAction(game.key);
+    })().catch(e => {
+        console.error('error occured, while processing actions:', e);
+    });
+}, e => {
+    console.error('error occured while processing event:', e);
 }, () => {
     console.log('connection closed.');
 });
