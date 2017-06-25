@@ -5,19 +5,13 @@ const db = database.database;
 const DB_PATHS = database.DB_PATHS({version: 1});
 
 /**
- * Transform the callbacks into a notification stream and enrich
- * each game notification with the objects of the participating players.
+ * Enriches a game object with information on player and opponent.
+ * 
+ * @param {FirebaseDataSnapshot} gameSnapshot Snapshot of a game that should be enriched.
+ * @return {Object}
  */
-const gameChangeStream = Rx.Observable.create(observer => {
-    const gamesRef = db.ref(DB_PATHS.GAMES);
-    const callbackRef = gamesRef.on('child_changed', val => observer.next(val));
-
-    return () => {
-        gamesRef.off('child_changed', callbackRef);
-    };
-}).map(async gameSnapshot => {
+async function enrichGame(gameSnapshot) {
     const game = gameSnapshot.val();
-    const gameKey = gameSnapshot.key;
     const playerId = game.currentPlayer;
     const opponentId = Object
         .keys(game.players)
@@ -32,9 +26,68 @@ const gameChangeStream = Rx.Observable.create(observer => {
     return Object.assign(game, {
         player,
         opponent,
-        key: gameKey
+        key: gameSnapshot.key
     });
-});
+}
+
+/**
+ * Transform the callbacks into a notification stream and enrich
+ * each game notification with the objects of the participating players.
+ */
+const gameChangeStream = Rx.Observable.create(observer => {
+    const gamesRef = db.ref(DB_PATHS.GAMES);
+    const callbackRef = gamesRef.on('child_changed', val => observer.next(val));
+
+    return () => {
+        gamesRef.off('child_changed', callbackRef);
+    };
+}).map(enrichGame);
+
+/**
+ * Gets the list of last sent notifications every hour.
+ * Checks which notifications have been sent since a certain threshold and
+ * resends notifications to get the players going again.
+ */
+const intervalStreamOfAbandonedGames = Rx.Observable
+    .interval(60 * 60 * 1000)
+    .timeInterval()
+    .map(invocationNumber => {
+        const notificationsRef = db.ref(DB_PATHS.NOTIFICATIONS);
+
+        return notificationsRef
+            .once('value')
+            .then(snapshot => snapshot.val());
+    })
+    .map(async promisedNotifications => {
+        const notifications = await promisedNotifications;
+        const notificationGameKeys = Object.keys(notifications);
+
+        const promisedGameSnapshots = notificationGameKeys
+            .map(getGame)
+        const gameSnapshots = await Promise.all(promisedGameSnapshots);
+        const gameExists = gameSnapshots.map(snapshot => snapshot.exists());
+
+        const currentTime = Date.now();
+        const olderThan3Hours = lastUpdate => Date.now() - lastUpdate > 3 * 60 * 60 * 1000;
+
+        return Promise.all(notificationGameKeys
+            .filter((value, index) => gameExists[index])
+            .filter(gameKey => olderThan3Hours(notifications[gameKey]))
+            .map(gameKey => getGame(gameKey))
+            .map(async game => enrichGame(await game)));
+    });
+
+/**
+ * Gets a game from the database.
+ * 
+ * @param {String} gameKey Key to identify the game.
+ * @return {Promise<FirebaseDataSnapshot>}
+ */
+function getGame(gameKey) {
+    const gamesRef = db.ref(`${DB_PATHS.GAMES}/${gameKey}`);
+
+    return gamesRef.once('value');
+}
 
 /**
  * Retrieves a player object from the database by its ID.
@@ -83,16 +136,11 @@ function hasGameEnded(game) {
  * @param {Object} game Game this notification is about.
  * @returns {Promise<Object>}
  */
-function sendNotification(game) {
+function sendNotification(title, body, token) {
     const payload = {
-        notification: hasGameEnded(game) ?
-        {
-            title: `${game.opponent.name} has just defeated you!`,
-            body: `Sorry ${game.player.name}, you have lost the game in round #${game.moves.length}.`
-        } :
-        {
-            title: `${game.opponent.name} has just moved!`,
-            body: `It is round #${game.moves.length} in your game against ${game.opponent.name}.`
+        notification: {
+            title,
+            body
         }
     };
     const options = {
@@ -100,9 +148,8 @@ function sendNotification(game) {
         timeToLive: 60 * 60 * 24
     };
 
-    console.log(`Change in game '${game.key}': sending notification to '${game.player.name}'`);
     return messaging.sendToDevice(
-        game.player.token,
+        token,
         payload,
         options
     );
@@ -112,7 +159,20 @@ gameChangeStream.subscribe(promisedGame => {
     (async () => {
         const game = await promisedGame;
 
-        await sendNotification(game);
+        console.log(`Change in game '${game.key}': sending notification to '${game.player.name}'`);
+        if (hasGameEnded(game)) {
+            await sendNotification(
+                `${game.opponent.name} has just defeated you!`,
+                `Sorry ${game.player.name}, you have lost the game in round #${game.moves.length}.`,
+                game.player.token
+            );
+        } else {
+            await sendNotification(
+                `${game.opponent.name} has just moved!`,
+                `It is round #${game.moves.length} in your game against ${game.opponent.name}.`,
+                game.player.token
+            );
+        }
         await updateLastGameAction(game.key);
     })().catch(e => {
         console.error('error occured, while processing actions:', e);
@@ -120,5 +180,24 @@ gameChangeStream.subscribe(promisedGame => {
 }, e => {
     console.error('error occured while processing event:', e);
 }, () => {
-    console.log('connection closed.');
+    console.warn('game stream: closed.');
+});
+
+intervalStreamOfAbandonedGames.subscribe(async promisedAbandonedGames => {
+    const abandonedGames = await promisedAbandonedGames;
+
+    abandonedGames
+        .forEach(abandonedGame => {
+            console.log(`The game ${abandonedGame.key} has not shown any activity for some time, will resend notification.`);
+            sendNotification(
+                `${abandonedGame.opponent.name} is still waiting.`,
+                `Hey ${abandonedGame.player.name}, ${abandonedGame.opponent.name} is still waiting for you to move.`,
+                abandonedGame.player.token
+            );
+            updateLastGameAction(abandonedGame.key);
+        });
+}, e => {
+    console.error('error occured while processing event:', e);
+}, () => {
+    console.warn('notification stream: closed.');
 });
