@@ -9,7 +9,7 @@
     "build-docker": "docker build -t floschnell/towers-notifier .; docker push floschnell/towers-notifier",
     "stop-remote": "ssh root@floschnell.de \"docker stop towers-notifier; docker rm towers-notifier\"",
     "install-remote": " ssh root@floschnell.de \"docker pull floschnell/towers-notifier\"",
-    "start-remote": "ssh root@floschnell.de \"docker run -d --restart=unless-stopped --name=towers-notifier floschnell/towers-notifier\""
+    "start-remote": "ssh root@floschnell.de \"docker run -d --restart=unless-stopped --name=towers-notifier floschnell/towers-notifier; sleep 1; docker logs towers-notifier;\""
   },
   "repository": {
     "type": "git",

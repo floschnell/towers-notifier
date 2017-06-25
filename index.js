@@ -188,7 +188,7 @@ intervalStreamOfAbandonedGames.subscribe(async promisedAbandonedGames => {
     const abandonedGames = await promisedAbandonedGames;
 
     abandonedGames
-        .forEach(abandonedGame => {
+        .forEach(async abandonedGame => {
             console.log(`The game ${abandonedGame.key} has not shown any activity for some time, will resend notification.`);
             await sendNotification(
                 `${abandonedGame.opponent.name} is still waiting.`,
