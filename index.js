@@ -140,7 +140,8 @@ function sendNotification(title, body, token) {
     const payload = {
         notification: {
             title,
-            body
+            body,
+            sound: 'default'
         }
     };
     const options = {
@@ -189,12 +190,12 @@ intervalStreamOfAbandonedGames.subscribe(async promisedAbandonedGames => {
     abandonedGames
         .forEach(abandonedGame => {
             console.log(`The game ${abandonedGame.key} has not shown any activity for some time, will resend notification.`);
-            sendNotification(
+            await sendNotification(
                 `${abandonedGame.opponent.name} is still waiting.`,
                 `Hey ${abandonedGame.player.name}, ${abandonedGame.opponent.name} is still waiting for you to move.`,
                 abandonedGame.player.token
             );
-            updateLastGameAction(abandonedGame.key);
+            await updateLastGameAction(abandonedGame.key);
         });
 }, e => {
     console.error('error occured while processing event:', e);
