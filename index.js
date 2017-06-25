@@ -44,6 +44,7 @@ const gameChangeStream = Rx.Observable.create(observer => {
  */
 function getPlayer(playerId) {
     const playerRef = db.ref(`${DB_PATHS.PLAYERS}/${playerId}`);
+
     return playerRef.once('value');
 }
 
@@ -54,7 +55,6 @@ function getPlayer(playerId) {
  * @return {Promise<void>}
  */
 function updateLastGameAction(gameKey) {
-    console.log(`Updating ${gameKey}.`);
     const gameLastUpdateRef = db.ref(`${DB_PATHS.NOTIFICATIONS}/${gameKey}`);
 
     return gameLastUpdateRef.set(Date.now());
@@ -84,7 +84,6 @@ function hasGameEnded(game) {
  * @returns {Promise<Object>}
  */
 function sendNotification(game) {
-    console.log(`Change in game '${game.key}': sending notification to '${game.player.name}'`);
     const payload = {
         notification: hasGameEnded(game) ?
         {
@@ -100,6 +99,8 @@ function sendNotification(game) {
         priority: "high",
         timeToLive: 60 * 60 * 24
     };
+
+    console.log(`Change in game '${game.key}': sending notification to '${game.player.name}'`);
     return messaging.sendToDevice(
         game.player.token,
         payload,
