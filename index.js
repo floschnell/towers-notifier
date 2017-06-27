@@ -136,12 +136,15 @@ function hasGameEnded(game) {
  * @param {Object} game Game this notification is about.
  * @returns {Promise<Object>}
  */
-function sendNotification(title, body, token) {
+function sendNotification(title, body, token, game) {
     const payload = {
         notification: {
             title,
             body,
             sound: 'default'
+        },
+        data: {
+            game
         }
     };
     const options = {
@@ -165,13 +168,15 @@ gameChangeStream.subscribe(promisedGame => {
             await sendNotification(
                 `${game.opponent.name} has just defeated you!`,
                 `Sorry ${game.player.name}, you have lost the game in round #${game.moves.length}.`,
-                game.player.token
+                game.player.token,
+                game.key
             );
         } else {
             await sendNotification(
                 `${game.opponent.name} has just moved!`,
                 `It is round #${game.moves.length} in your game against ${game.opponent.name}.`,
-                game.player.token
+                game.player.token,
+                game.key
             );
         }
         await updateLastGameAction(game.key);
@@ -193,7 +198,8 @@ intervalStreamOfAbandonedGames.subscribe(async promisedAbandonedGames => {
             await sendNotification(
                 `${abandonedGame.opponent.name} is still waiting.`,
                 `Hey ${abandonedGame.player.name}, ${abandonedGame.opponent.name} is still waiting for you to move.`,
-                abandonedGame.player.token
+                abandonedGame.player.token,
+                abandonedGame.key
             );
             await updateLastGameAction(abandonedGame.key);
         });
