@@ -68,7 +68,7 @@ const intervalStreamOfAbandonedGames = Rx.Observable
         const gameExists = gameSnapshots.map(snapshot => snapshot.exists());
 
         const currentTime = Date.now();
-        const olderThan3Hours = lastUpdate => Date.now() - lastUpdate > 3 * 60 * 60 * 1000;
+        const olderThan24Hours = lastUpdate => Date.now() - lastUpdate > 24 * 60 * 60 * 1000;
 
         return Promise.all(notificationGameKeys
             .filter((value, index) => gameExists[index])
