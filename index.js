@@ -12,10 +12,16 @@ const DB_PATHS = database.DB_PATHS({ version: 1 });
  */
 async function enrichGame(gameSnapshot) {
     const game = gameSnapshot.val();
-    const playerId = game.currentPlayer;
-    const opponentId = Object
+    let playerId = game.currentPlayer;
+    let opponentId = Object
         .keys(game.players)
         .find(player => player !== playerId);
+    if (game.moves.length > 0) {
+        playerId = game.moves[game.moves.length - 1].player;
+        playerId = Object
+            .keys(game.players)
+            .find(player => player !== playerId);
+    }
     const promisedPlayer = getPlayer(playerId);
     const promisedOpponent = getPlayer(opponentId);
     const playerSnapshots = await Promise
@@ -42,6 +48,38 @@ const gameChangeStream = Rx.Observable.create(observer => {
         gamesRef.off('child_changed', callbackRef);
     };
 }).map(enrichGame);
+
+/**
+ * Transform the callbacks into a notification stream and enrich
+ * each request notification with the objects of the participating players.
+ */
+const gameRequestStream = Rx.Observable.create(observer => {
+    let initialized = false;
+    const gameRequestsRef = db.ref(DB_PATHS.REQUESTS);
+    const changeCallbackRef = gameRequestsRef.on('child_changed', val => observer.next(val));
+    const createCallbackRef = gameRequestsRef.on('child_added', val => initialized ? observer.next(val) : null);
+    gameRequestsRef.once('value', () => { initialized = true });
+
+    return () => {
+        gameRequestsRef.off('child_changed', changeCallbackRef);
+        gameRequestsRef.off('child_added', createCallbackRef);
+    };
+}).map(gameRequestsSnapshot => {
+    const gameRequests = gameRequestsSnapshot.val();
+    const targetPlayerID = gameRequestsSnapshot.key;
+    const requests = [];
+    Object.keys(gameRequests).forEach(request => {
+        requests.push(gameRequests[request]);
+    });
+    requests.sort((a, b) => a.when < b.when ? 1 : -1);
+    return Object.assign(requests[0], { targetPlayerID });
+}).map(async (promisedGameRequest) => {
+    const gameRequest = await promisedGameRequest;
+    const targetPlayerSnapshot = await db.ref(`${DB_PATHS.PLAYERS}/${gameRequest.targetPlayerID}`).once('value');
+    const targetPlayer = targetPlayerSnapshot.val();
+
+    return Object.assign(gameRequest, { targetPlayer });
+});
 
 /**
  * Gets the list of last sent notifications every hour.
@@ -136,16 +174,16 @@ function hasGameEnded(game) {
  * @param {Object} game Game this notification is about.
  * @returns {Promise<Object>}
  */
-function sendNotification(title, body, token, game) {
+function sendNotification(title, body, token, game = null) {
     const payload = {
         notification: {
             title,
             body,
             sound: 'default'
         },
-        data: {
+        data: game ? {
             game
-        }
+        } : {}
     };
     const options = {
         priority: "high",
@@ -208,3 +246,17 @@ intervalStreamOfAbandonedGames.subscribe(async promisedAbandonedGames => {
 }, () => {
     console.warn('notification stream: closed.');
 });
+
+gameRequestStream.subscribe(async promisedEnrichedGameRequest => {
+    const enrichedGameRequest = await promisedEnrichedGameRequest;
+
+    sendNotification(
+        `New Game Request from ${enrichedGameRequest.contender.name}!`,
+        `${enrichedGameRequest.contender.name} has just sent you a request in Towers.`,
+        enrichedGameRequest.targetPlayer.token);
+    console.log('sending request notification to', enrichedGameRequest.targetPlayer.name);
+}, e => {
+    console.error('error occured while processing event:', e);
+}, () => {
+    console.warn('game request stream: closed.');
+})
