@@ -16,18 +16,24 @@ async function enrichGame(gameSnapshot) {
     let opponentId = Object
         .keys(game.players)
         .find(player => player !== playerId);
+
     if (game.moves.length > 0) {
         opponentId = game.moves[game.moves.length - 1].player;
         playerId = Object
             .keys(game.players)
-            .find(player => player !== playerId);
+            .find(player => player !== opponentId);
     }
+
     const promisedPlayer = getPlayer(playerId);
     const promisedOpponent = getPlayer(opponentId);
     const playerSnapshots = await Promise
         .all([promisedPlayer, promisedOpponent]);
     const [player, opponent] = playerSnapshots
-        .map(playerSnapshot => playerSnapshot.val());
+        .map(playerSnapshot => Object.assign(
+            playerSnapshot.val(), {
+                id: playerSnapshot.key
+            }
+        ));
 
     return Object.assign(game, {
         player,
@@ -201,23 +207,27 @@ gameChangeStream.subscribe(promisedGame => {
     (async () => {
         const game = await promisedGame;
 
-        console.log(`Change in game '${game.key}': sending notification to '${game.player.name}'`);
-        if (hasGameEnded(game)) {
-            await sendNotification(
-                `${game.opponent.name} has just defeated you!`,
-                `Sorry ${game.player.name}, you have lost the game in round #${game.moves.length}.`,
-                game.player.token,
-                game.key
-            );
-        } else {
-            await sendNotification(
-                `${game.opponent.name} has just moved!`,
-                `It is round #${game.moves.length} in your game against ${game.opponent.name}.`,
-                game.player.token,
-                game.key
-            );
+        console.log(game);
+        if (game.opponent.id !== game.player.id) {
+            console.log(`Change in game '${game.key}': sending notification to '${game.player.name}'`);
+
+            if (hasGameEnded(game)) {
+                await sendNotification(
+                    `${game.opponent.name} has just defeated you!`,
+                    `Sorry ${game.player.name}, you have lost the game in round #${game.moves.length}.`,
+                    game.player.token,
+                    game.key
+                );
+            } else {
+                await sendNotification(
+                    `${game.opponent.name} has just moved!`,
+                    `It is round #${game.moves.length} in your game against ${game.opponent.name}.`,
+                    game.player.token,
+                    game.key
+                );
+            }
+            await updateLastGameAction(game.key);
         }
-        await updateLastGameAction(game.key);
     })().catch(e => {
         console.error('error occured, while processing actions:', e);
     });
