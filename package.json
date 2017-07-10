@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "deploy": "npm run build-docker; npm run stop-remote; npm run install-remote; npm run start-remote",
+    "deploy": "yarn run build-docker; yarn run stop-remote; yarn run install-remote; yarn run start-remote",
     "build-docker": "docker build -t floschnell/towers-notifier .; docker push floschnell/towers-notifier",
     "stop-remote": "ssh root@floschnell.de \"docker stop towers-notifier; docker rm towers-notifier\"",
     "install-remote": " ssh root@floschnell.de \"docker pull floschnell/towers-notifier\"",
