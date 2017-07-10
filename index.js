@@ -17,7 +17,7 @@ async function enrichGame(gameSnapshot) {
         .keys(game.players)
         .find(player => player !== playerId);
     if (game.moves.length > 0) {
-        playerId = game.moves[game.moves.length - 1].player;
+        opponentId = game.moves[game.moves.length - 1].player;
         playerId = Object
             .keys(game.players)
             .find(player => player !== playerId);
