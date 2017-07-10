@@ -2,7 +2,7 @@ const Rx = require('rxjs');
 const messaging = require('./messaging').messaging;
 const database = require('./database');
 const db = database.database;
-const DB_PATHS = database.DB_PATHS({version: 1});
+const DB_PATHS = database.DB_PATHS({ version: 1 });
 
 /**
  * Enriches a game object with information on player and opponent.
@@ -72,7 +72,7 @@ const intervalStreamOfAbandonedGames = Rx.Observable
 
         return Promise.all(notificationGameKeys
             .filter((value, index) => gameExists[index])
-            .filter(gameKey => olderThan3Hours(notifications[gameKey]))
+            .filter(gameKey => olderThan24Hours(notifications[gameKey]))
             .map(gameKey => getGame(gameKey))
             .map(async game => enrichGame(await game)));
     });
@@ -122,7 +122,7 @@ function updateLastGameAction(gameKey) {
 function hasGameEnded(game) {
     if (game.moves) {
         const lastMove = game.moves[game.moves.length - 1];
-        
+
         return lastMove.targetField.y === 0 ||
             lastMove.targetField.y === 7;
     }
