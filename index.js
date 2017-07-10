@@ -207,7 +207,6 @@ gameChangeStream.subscribe(promisedGame => {
     (async () => {
         const game = await promisedGame;
 
-        console.log(game);
         if (game.opponent.id !== game.player.id) {
             console.log(`Change in game '${game.key}': sending notification to '${game.player.name}'`);
 
